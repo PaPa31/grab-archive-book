@@ -1,50 +1,21 @@
 const puppeteer = require('puppeteer');
-const fs = require('fs');
-const path = require('path');
-
-const IA_URL = 'https://archive.org/details/electroniccircui0000sent/page/1/mode/2up?view=theater';
-const OUTPUT_DIR = './screenshots';
-const MAX_PAGES = 100; // adjust this
 
 (async () => {
-  if (!fs.existsSync(OUTPUT_DIR)) fs.mkdirSync(OUTPUT_DIR);
-
-  const browser = await puppeteer.launch({ headless: 'new', defaultViewport: null });
+  const url = 'https://archive.org/details/electroniccircui0000sent/page/n11/mode/2up?view=theater';
+  const browser = await puppeteer.launch({ headless: false }); // Turn off headless to debug if needed
   const page = await browser.newPage();
-  await page.goto(IA_URL, { waitUntil: 'networkidle2' });
+  await page.goto(url, { waitUntil: 'networkidle2' });
 
-  let pageNum = 1;
+  // Wait for the visible page image
+  await page.waitForSelector('img.BRpageimage');
 
-  for (let i = 0; i < MAX_PAGES; i++) {
-    try {
-      // Wait for image viewer to load
-      await page.waitForSelector('.BRpageimage', { timeout: 10000 });
+  // Grab all visible page images
+  const imageSrcs = await page.evaluate(() => {
+    return Array.from(document.querySelectorAll('img.BRpageimage'))
+      .map(img => img.src);
+  });
 
-      const filePath = path.join(OUTPUT_DIR, `page_${String(pageNum).padStart(3, '0')}.png`);
-      await page.screenshot({ path: filePath });
-
-      console.log(`📸 Saved: ${filePath}`);
-      pageNum++;
-
-      // Click "Next" button
-      const nextButton = await page.$('.BRnavlink.br-right');
-      if (!nextButton) {
-        console.log('❌ No more pages.');
-        break;
-      }
-
-      await Promise.all([
-        nextButton.click(),
-        page.waitForTimeout(1000), // wait briefly for animation
-        page.waitForSelector('.BRpageimage'), // wait for new pages to load
-      ]);
-    } catch (err) {
-      console.error(`⚠️ Error on page ${pageNum}:`, err.message);
-      break;
-    }
-  }
+  console.log('Image sources:', imageSrcs);
 
   await browser.close();
-  console.log('✅ Done!');
 })();
-
