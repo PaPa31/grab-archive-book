@@ -2,14 +2,13 @@ const puppeteer = require('puppeteer');
 
 (async () => {
   const url = 'https://archive.org/details/electroniccircui0000sent/page/n11/mode/2up?view=theater';
-  const browser = await puppeteer.launch({ headless: false }); // Turn off headless to debug if needed
+  const browser = await puppeteer.launch({ headless: false, defaultViewport: null });
   const page = await browser.newPage();
   await page.goto(url, { waitUntil: 'networkidle2' });
 
-  // Wait for the visible page image
-  await page.waitForSelector('img.BRpageimage');
+  await page.waitForSelector('img.BRpageimage', { timeout: 10000 });
+  await new Promise(resolve => setTimeout(resolve, 3000)); // Give extra time for JS blob loading
 
-  // Grab all visible page images
   const imageSrcs = await page.evaluate(() => {
     return Array.from(document.querySelectorAll('img.BRpageimage'))
       .map(img => img.src);
@@ -17,5 +16,6 @@ const puppeteer = require('puppeteer');
 
   console.log('Image sources:', imageSrcs);
 
-  await browser.close();
+  console.log('Done! Browser will stay open.');
+  await new Promise(() => {}); // <-- Keep browser open
 })();
