@@ -1,80 +1,68 @@
-const puppeteer = require("puppeteer");
-const fs = require("fs");
-const path = require("path");
+// ia_screenshot.js
+const puppeteer = require('puppeteer');
+const fs = require('fs');
+const path = require('path');
 
-const startPageNum = 11;
-const maxEmpty = 3;
-const outputDir = "screenshots";
+const urls = [
+  'https://archive.org/details/electroniccircui0000sent/page/n11/mode/2up?view=theater',
+  'https://archive.org/details/electroniccircui0000sent/page/n13/mode/2up?view=theater',
+  'https://archive.org/details/electroniccircui0000sent/page/n15/mode/2up?view=theater'
+];
+
+const screenshotDir = path.join(__dirname, 'screenshots');
+if (!fs.existsSync(screenshotDir)) fs.mkdirSync(screenshotDir);
 
 (async () => {
-  if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir);
-
-  const browser = await puppeteer.launch({ headless: true, defaultViewport: null });
+  const browser = await puppeteer.launch({ headless: 'new' });
   const page = await browser.newPage();
 
-  let saved = 0;
-  let emptyCount = 0;
-  let pageNum = startPageNum;
-
-  while (emptyCount < maxEmpty) {
-    const url = `https://archive.org/details/electroniccircui0000sent/page/n${pageNum}/mode/2up?view=theater`;
+  for (const url of urls) {
     console.log(`🧭 Visiting: ${url}`);
+    await page.goto(url, { waitUntil: 'networkidle2', timeout: 0 });
 
-    await page.goto(url, { waitUntil: "networkidle2", timeout: 30000 });
-
-    // Wait until all BRpageimage elements are fully loaded
-    const loaded = await page.evaluate(async () => {
-      const imgs = Array.from(document.querySelectorAll("img.BRpageimage"));
-      if (imgs.length === 0) return 0;
-
-      // Wait for each image to load
-      await Promise.all(imgs.map(img => {
-        return new Promise((resolve) => {
-          if (img.complete && img.naturalHeight !== 0) return resolve();
-          img.onload = () => resolve();
-          img.onerror = () => resolve();
-        });
-      }));
-
-      return imgs.length;
-    });
-
-    if (loaded === 0) {
-      console.warn(`⚠️ No images loaded on page n${pageNum}`);
-      emptyCount++;
-      pageNum += 2;
+    // Wait for reader container
+    try {
+      await page.waitForSelector('.BRpageimage[src^="blob:"]', { timeout: 15000 });
+    } catch (e) {
+      console.log(`⚠️ No images loaded on page ${url.split('/page/')[1]?.split('/')[0]}`);
       continue;
     }
 
-    const dataUrls = await page.evaluate(() => {
-      const imgs = Array.from(document.querySelectorAll("img.BRpageimage"));
-      return imgs.map(img => {
-        const canvas = document.createElement("canvas");
-        canvas.width = img.naturalWidth;
-        canvas.height = img.naturalHeight;
-        const ctx = canvas.getContext("2d");
-        ctx.drawImage(img, 0, 0);
-        return canvas.toDataURL("image/png");
-      });
-    });
+    // Extract all BRpageimage <img> elements
+    const blobs = await page.$$eval('.BRpageimage', imgs =>
+      imgs.map(img => ({ src: img.src, width: img.naturalWidth, height: img.naturalHeight }))
+    );
 
-    for (const dataUrl of dataUrls) {
-      const base64 = dataUrl.split(",")[1];
-      const buffer = Buffer.from(base64, "base64");
-      if (buffer.length < 50 * 1024) {
-        console.log(`⚠️ Blob too small (${(buffer.length / 1024).toFixed(1)} KB), skipping`);
-        emptyCount++;
-        continue;
-      }
-      const filename = `page_${++saved}.png`;
-      fs.writeFileSync(path.join(outputDir, filename), buffer);
-      console.log(`✅ Saved ${filename}, ${(buffer.length / 1024).toFixed(1)} KB`);
-      emptyCount = 0;
+    console.log(`🔍 Blob URLs found: ${blobs.length}`);
+    if (blobs.length === 0) {
+      console.log(`⚠️ No <img> elements found.`);
+      continue;
     }
 
-    pageNum += 2;
+    let valid = 0;
+
+    for (const [i, blob] of blobs.entries()) {
+      const blobSize = `${blob.width}x${blob.height}`;
+      if (!blob.src.startsWith('blob:') || blob.width < 100 || blob.height < 100) {
+        console.log(`⚠️ Blob too small (${blobSize}), skipping`);
+        continue;
+      }
+
+      // Screenshot the specific image element
+      const elHandle = (await page.$$('.BRpageimage'))[i];
+      const filename = `page-${url.match(/\/n(\d+)/)[1]}-${i + 1}.png`;
+      const filepath = path.join(screenshotDir, filename);
+
+      await elHandle.screenshot({ path: filepath });
+      console.log(`✅ Saved: ${filepath}`);
+      valid++;
+    }
+
+    if (valid === 0) {
+      console.log(`⚠️ No valid screenshots saved for page ${url}`);
+    }
   }
 
-  console.log(`🏁 Done. ${saved} pages saved.`);
   await browser.close();
+  console.log('🏁 Done.');
 })();
