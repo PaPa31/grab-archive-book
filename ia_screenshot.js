@@ -2,96 +2,66 @@ const puppeteer = require("puppeteer");
 const fs = require("fs");
 const path = require("path");
 
-const startUrl = "https://archive.org/details/electroniccircui0000sent/page/n11/mode/2up?view=theater";
+const startPageNum = 11;
+const maxEmpty = 3;
 const outputDir = "screenshots";
-const PAGE_STEP = 2;
-const MAX_EMPTY_COUNT = 3;
-const MIN_VALID_SIZE = 10 * 1024; // 10 KB for debug
 
 (async () => {
-  if (!fs.existsSync(outputDir)) {
-    fs.mkdirSync(outputDir);
-  }
+  if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir);
 
-  const browser = await puppeteer.launch({
-    headless: true,
-    defaultViewport: { width: 1920, height: 1080 },
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
-  });
-
+  const browser = await puppeteer.launch({ headless: true, defaultViewport: null });
   const page = await browser.newPage();
-  let currentPageNumber = getPageNumberFromUrl(startUrl);
+
+  let saved = 0;
   let emptyCount = 0;
-  let savedCount = 0;
+  let pageNum = startPageNum;
 
-  while (emptyCount < MAX_EMPTY_COUNT) {
-    const url = buildPageUrl(currentPageNumber);
+  while (emptyCount < maxEmpty) {
+    const url = `https://archive.org/details/electroniccircui0000sent/page/n${pageNum}/mode/2up?view=theater`;
     console.log(`🧭 Visiting: ${url}`);
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
 
-    try {
-      await page.waitForSelector(".iaBookReaderPage img", { timeout: 15000 });
-    } catch {
-      console.warn(`⚠️ No images found on page ${url}`);
+    await page.goto(url, { waitUntil: "networkidle2", timeout: 30000 });
+    await new Promise(r => setTimeout(r, 3000));  // wait for rendering
+
+    const blobs = await page.evaluate(() => Array.from(document.querySelectorAll("img.BRpageimage"))
+      .map(img => img.src));
+    console.log(`🔍 Blob URLs found: ${blobs.length}`);
+    if (blobs.length === 0) {
+      console.warn(`⚠️ No blob images on page n${pageNum}`);
       emptyCount++;
-      currentPageNumber += PAGE_STEP;
+      pageNum += 2;
       continue;
     }
 
-    const imageHandles = await page.$$(".iaBookReaderPage");
-    const imageSrcs = await page.$$eval(".iaBookReaderPage img", imgs => imgs.map(img => img.src));
-    console.log(`🖼 Found ${imageHandles.length} image containers`);
-    if (imageHandles.length === 0) {
-      emptyCount++;
-      currentPageNumber += PAGE_STEP;
-      continue;
-    }
+    const dataUrls = await page.evaluate(() => {
+      const imgs = Array.from(document.querySelectorAll("img.BRpageimage"));
+      return imgs.map(img => {
+        const canvas = document.createElement("canvas");
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0);
+        return canvas.toDataURL("image/png");
+      });
+    });
 
-    for (let i = 0; i < imageHandles.length; i++) {
-      const fileIndex = savedCount + 1;
-      const fileName = `page_${fileIndex}.png`;
-      const filePath = path.join(outputDir, fileName);
-
-      if (fs.existsSync(filePath)) {
-        console.log(`⏭ Skipping ${fileName} (already exists)`);
-        savedCount++;
+    for (const dataUrl of dataUrls) {
+      const base64 = dataUrl.split(",")[1];
+      const buffer = Buffer.from(base64, "base64");
+      if (buffer.length < 50 * 1024) { // at least 50 KB
+        console.log(`⚠️ Blob too small (${(buffer.length/1024).toFixed(1)} KB), skipping`);
+        emptyCount++;
         continue;
       }
-
-      try {
-        await imageHandles[i].screenshot({ path: filePath });
-      } catch (err) {
-        console.warn(`⚠️ Error capturing element ${i}, using full page fallback`);
-        await page.screenshot({ path: filePath });
-      }
-
-      const stats = fs.statSync(filePath);
-      const sizeKB = (stats.size / 1024).toFixed(1);
-
-      if (stats.size < MIN_VALID_SIZE) {
-        emptyCount++;
-        console.log(`⚠️ Discarded ${fileName} (only ${sizeKB} KB, ${emptyCount}/${MAX_EMPTY_COUNT})`);
-        fs.unlinkSync(filePath);
-      } else {
-        console.log(`✅ Saved ${fileName} (${sizeKB} KB)`);
-        savedCount++;
-        emptyCount = 0;
-      }
+      const filename = `page_${++saved}.png`;
+      fs.writeFileSync(path.join(outputDir, filename), buffer);
+      console.log(`✅ Saved ${filename}, ${(buffer.length/1024).toFixed(1)} KB`);
+      emptyCount = 0;
     }
 
-    currentPageNumber += PAGE_STEP;
+    pageNum += 2;
   }
 
-  console.log(`🏁 Finished. ${savedCount} pages saved.`);
+  console.log(`🏁 Done. ${saved} pages saved.`);
   await browser.close();
 })();
-
-// Helpers
-function getPageNumberFromUrl(url) {
-  const match = url.match(/\/page\/n(\d+)/);
-  return match ? parseInt(match[1], 10) : 1;
-}
-
-function buildPageUrl(pageNum) {
-  return `https://archive.org/details/electroniccircui0000sent/page/n${pageNum}/mode/2up?view=theater`;
-}
