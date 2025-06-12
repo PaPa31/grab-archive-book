@@ -1,58 +1,81 @@
-const puppeteer = require('puppeteer');
-const fs = require('fs');
-const path = require('path');
+const puppeteer = require("puppeteer");
+const fs = require("fs");
+const path = require("path");
 
-const BOOK_URL = 'https://archive.org/details/electroniccircui0000sent';
-const OUT_DIR = __dirname;
+const startUrl = "https://archive.org/details/electroniccircui0000sent/page/n11/mode/2up?view=theater";
+const outputDir = "screenshots";
+
+const MAX_EMPTY_COUNT = 3;
+const PAGE_STEP = 2;
 
 (async () => {
-  const browser = await puppeteer.launch({ headless: false, defaultViewport: null });
+  if (!fs.existsSync(outputDir)) {
+    fs.mkdirSync(outputDir);
+  }
+
+  const browser = await puppeteer.launch({
+    headless: true,
+    defaultViewport: null,
+    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+  });
+
   const page = await browser.newPage();
+  let currentPageNumber = getPageNumberFromUrl(startUrl);
+  let emptyCount = 0;
+  let savedCount = 0;
 
-  let saved = 0;
-  let pageNum = 11; // Start at some known readable page (n11 is good)
+  while (emptyCount < MAX_EMPTY_COUNT) {
+    const url = buildPageUrl(currentPageNumber);
+    console.log(`🧭 Visiting: ${url}`);
+    await page.goto(url, { waitUntil: "networkidle2", timeout: 30000 });
 
-  while (pageNum < 50) { // Adjust this upper limit as needed
-    const fullUrl = `${BOOK_URL}/page/n${pageNum}/mode/2up?view=theater`;
-    console.log(`🧭 Visiting: ${fullUrl}`);
-    await page.goto(fullUrl, { waitUntil: 'networkidle2' });
-
-    await page.waitForSelector('img.BRpageimage', { timeout: 10000 });
-    await new Promise(resolve => setTimeout(resolve, 5000)); // Let it render fully
-
-    const images = await page.evaluate(() => {
-      return Promise.all(
-        Array.from(document.querySelectorAll('img.BRpageimage')).map(async (img) => {
-          const canvas = document.createElement('canvas');
-          canvas.width = img.naturalWidth;
-          canvas.height = img.naturalHeight;
-          const ctx = canvas.getContext('2d');
-          ctx.drawImage(img, 0, 0);
-          return canvas.toDataURL('image/png');
-        })
-      );
-    });
+    // Wait for images to load
+    await page.waitForSelector(".iaBookReaderPage img", { timeout: 10000 }).catch(() => null);
+    const images = await page.$$eval(".iaBookReaderPage img", imgs => imgs.map(img => img.src));
 
     for (let i = 0; i < images.length; i++) {
-      const dataUrl = images[i];
-      const base64 = dataUrl.replace(/^data:image\/png;base64,/, '');
+      const fileIndex = savedCount + 1;
+      const fileName = `page_${fileIndex}.png`;
+      const filePath = path.join(outputDir, fileName);
 
-      // Skip if suspiciously small (blank or placeholder)
-      const sizeKb = Buffer.from(base64, 'base64').length / 1024;
-      if (sizeKb < 30) {
-        console.log(`⚠️  Skipping empty/placeholder image (${sizeKb.toFixed(1)} KB)`);
+      if (fs.existsSync(filePath)) {
+        console.log(`⚠️  Skipping ${fileName} (already exists)`);
+        savedCount++;
         continue;
       }
 
-      const filename = `page_${saved + 1}.png`;
-      fs.writeFileSync(path.join(OUT_DIR, filename), base64, 'base64');
-      console.log(`✅ Saved ${filename} (${sizeKb.toFixed(1)} KB)`);
-      saved++;
+      const imageElement = (await page.$$(".iaBookReaderPage"))[i];
+      if (!imageElement) continue;
+
+      await imageElement.screenshot({ path: filePath });
+      const stats = fs.statSync(filePath);
+      const sizeKB = (stats.size / 1024).toFixed(1);
+
+      if (stats.size < 40000) {
+        emptyCount++;
+        console.log(`⚠️  Skipping low-content page_${fileIndex}.png (${sizeKB} KB, ${emptyCount}/${MAX_EMPTY_COUNT} empty)`);
+        fs.unlinkSync(filePath);
+        continue;
+      }
+
+      console.log(`✅ Saved ${fileName} (${sizeKB} KB)`);
+      savedCount++;
+      emptyCount = 0;
     }
 
-    pageNum += 2; // next 2-up pair (each step loads two pages)
+    currentPageNumber += PAGE_STEP;
   }
 
-  console.log(`🏁 Done! Saved ${saved} images.`);
+  console.log(`🏁 Done! Saved ${savedCount} images.`);
   await browser.close();
 })();
+
+// Helpers
+function getPageNumberFromUrl(url) {
+  const match = url.match(/\/page\/n(\d+)/);
+  return match ? parseInt(match[1], 10) : 1;
+}
+
+function buildPageUrl(pageNum) {
+  return `https://archive.org/details/electroniccircui0000sent/page/n${pageNum}/mode/2up?view=theater`;
+}
