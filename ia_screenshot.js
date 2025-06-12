@@ -21,13 +21,26 @@ const outputDir = "screenshots";
     console.log(`🧭 Visiting: ${url}`);
 
     await page.goto(url, { waitUntil: "networkidle2", timeout: 30000 });
-    await new Promise(r => setTimeout(r, 3000));  // wait for rendering
 
-    const blobs = await page.evaluate(() => Array.from(document.querySelectorAll("img.BRpageimage"))
-      .map(img => img.src));
-    console.log(`🔍 Blob URLs found: ${blobs.length}`);
-    if (blobs.length === 0) {
-      console.warn(`⚠️ No blob images on page n${pageNum}`);
+    // Wait until all BRpageimage elements are fully loaded
+    const loaded = await page.evaluate(async () => {
+      const imgs = Array.from(document.querySelectorAll("img.BRpageimage"));
+      if (imgs.length === 0) return 0;
+
+      // Wait for each image to load
+      await Promise.all(imgs.map(img => {
+        return new Promise((resolve) => {
+          if (img.complete && img.naturalHeight !== 0) return resolve();
+          img.onload = () => resolve();
+          img.onerror = () => resolve();
+        });
+      }));
+
+      return imgs.length;
+    });
+
+    if (loaded === 0) {
+      console.warn(`⚠️ No images loaded on page n${pageNum}`);
       emptyCount++;
       pageNum += 2;
       continue;
@@ -48,14 +61,14 @@ const outputDir = "screenshots";
     for (const dataUrl of dataUrls) {
       const base64 = dataUrl.split(",")[1];
       const buffer = Buffer.from(base64, "base64");
-      if (buffer.length < 50 * 1024) { // at least 50 KB
-        console.log(`⚠️ Blob too small (${(buffer.length/1024).toFixed(1)} KB), skipping`);
+      if (buffer.length < 50 * 1024) {
+        console.log(`⚠️ Blob too small (${(buffer.length / 1024).toFixed(1)} KB), skipping`);
         emptyCount++;
         continue;
       }
       const filename = `page_${++saved}.png`;
       fs.writeFileSync(path.join(outputDir, filename), buffer);
-      console.log(`✅ Saved ${filename}, ${(buffer.length/1024).toFixed(1)} KB`);
+      console.log(`✅ Saved ${filename}, ${(buffer.length / 1024).toFixed(1)} KB`);
       emptyCount = 0;
     }
 
