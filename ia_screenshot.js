@@ -10,45 +10,38 @@ if (!fs.existsSync(outDir)) {
 
 // Pages to capture: start from n11 to n15 in steps of 2 (each has left+right)
 // const startPages = [11, 13, 15];
-const startPages = Array.from({ length: 5 }, (_, i) => 29 + i * 2);
+const startPages = Array.from({ length: 5 }, (_, i) => 27 + i * 2);
 // const startPages = Array.from({ length: 25 }, (_, i) => 11 + i * 2);
 
 (async () => {
   const browser = await puppeteer.launch({
-    headless: false,       // Visible browser for debugging
-    devtools: true,        // Open DevTools
-    defaultViewport: null, // Use full screen
+    headless: false,
+    devtools: true,
+    defaultViewport: null,
     args: ['--start-maximized']
   });
 
   const page = await browser.newPage();
 
-  for (const startPage of startPages) {
-    const url = `https://archive.org/details/electroniccircui0000sent/page/n${startPage}/mode/2up?view=theater`;
-    console.log(`🧭 Visiting: ${url}`);
-    await page.goto(url, { waitUntil: 'networkidle2', timeout: 0 });
-    
-    const leftSelector = `div.pagediv${startPage}.BRpage-visible > img`;
-    const rightSelector = `div.pagediv${startPage + 1}.BRpage-visible > img`;
-    
-    await page.evaluate((leftSelector, rightSelector) => {
-      const leftImg = document.querySelector(leftSelector);
-      const rightImg = document.querySelector(rightSelector);
-      leftImg?.scrollIntoView({ behavior: "instant", block: "center" });
-      rightImg?.scrollIntoView({ behavior: "instant", block: "center" });
-    }, leftSelector, rightSelector);
-
-    // Small delay to allow image rendering
-    await new Promise(resolve => setTimeout(resolve, 3000));
-
-    for (let offset = 0; offset <= 1; offset++) {
+  for (const startPage of startPages) {  // 🔧 outer loop over pages
+    for (let offset = 0; offset <= 1; offset++) {  // 🔁 loop for left & right
       const actualPage = startPage + offset;
       const selector = `div.pagediv${actualPage}.BRpage-visible > img`;
 
       try {
-        await page.waitForSelector(selector, { timeout: 5000 });
-        const imgEl = await page.$(selector);
+        await page.waitForFunction(
+          (selector) => {
+            const img = document.querySelector(selector);
+            return img && img.complete && img.naturalWidth > 100;
+          },
+          { timeout: 15000 },
+          selector
+        );
 
+        const imgSrc = await page.$eval(selector, el => el.src);
+        console.log(`📸 Page ${actualPage} image src: ${imgSrc}`);
+
+        const imgEl = await page.$(selector);
         if (imgEl) {
           const clip = await imgEl.boundingBox();
           const filename = path.join(outDir, `page_n${actualPage}.png`);
@@ -57,23 +50,19 @@ const startPages = Array.from({ length: 5 }, (_, i) => 29 + i * 2);
             continue;
           }
 
-          await page.screenshot({
-            path: filename,
-            clip,
-          });
-
+          await page.screenshot({ path: filename, clip });
           console.log(`✅ Saved: ${filename}`);
         } else {
           console.warn(`⚠️ Element not found for page n${actualPage}`);
         }
       } catch (err) {
-        console.warn(`⚠️ Timeout or error finding selector for page n${actualPage}:`, err.message);
+        console.warn(`⚠️ Timeout or error for page n${actualPage}:`, err.message);
       }
-      
-      await new Promise(resolve => setTimeout(resolve, 1500)); // 1.5s delay
+
+      await new Promise(resolve => setTimeout(resolve, 1500));
     }
   }
 
   console.log('🏁 Done.');
-  // await browser.close(); // Leave browser open for inspection
 })();
+
