@@ -10,7 +10,12 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
 if (!fs.existsSync(SCREENSHOT_DIR)) fs.mkdirSync(SCREENSHOT_DIR);
 
 (async () => {
-  const browser = await puppeteer.launch({ headless: false, defaultViewport: null, args: ['--start-maximized'] });
+  const browser = await puppeteer.launch({
+    headless: false,
+    slowMo: 100,
+    defaultViewport: null,
+    args: ['--start-maximized']
+  });
   const page = await browser.newPage();
 
   page.on('console', msg => {
@@ -86,5 +91,5 @@ if (!fs.existsSync(SCREENSHOT_DIR)) fs.mkdirSync(SCREENSHOT_DIR);
   }
 
   console.log('🏁 Done.');
-  await browser.close();
+//   await browser.close();
 })();
