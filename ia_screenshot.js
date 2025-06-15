@@ -1,103 +1,61 @@
 const puppeteer = require('puppeteer');
-const fs = require('fs');
-const path = require('path');
 
-const outDir = path.join(__dirname, 'screenshots');
-if (!fs.existsSync(outDir)) {
-  fs.mkdirSync(outDir);
-}
-
-// 📖 Choose Archive.org page numbers to start from (each loads 2 pages in 2-up view)
-const startPages = Array.from({ length: 2 }, (_, i) => 68 + i * 2);
+const START_PAGE = 68;
+const PAGE_COUNT = 3;
+const BASE_URL = 'https://archive.org/details/electroniccircui0000sent';
 
 (async () => {
   const browser = await puppeteer.launch({
-    headless: false,
-    devtools: true,
+    headless: false, // Use true for no GUI
     defaultViewport: null,
     args: ['--start-maximized']
   });
 
   const page = await browser.newPage();
 
-  for (const startPage of startPages) {
-    const url = `https://archive.org/details/electroniccircui0000sent/page/${startPage}/mode/2up?view=theater`;
+  // Intercept and clean browser logs
+  page.on('console', msg => {
+    const text = msg.text();
+    if (text.includes('SoundManager') || text.startsWith('JSHandle@error')) return;
+    console.log('📣 BROWSER LOG:', text);
+  });
+
+  for (let i = 0; i < PAGE_COUNT; i++) {
+    const pageNum = START_PAGE + i * 2;
+    const url = `${BASE_URL}/page/${pageNum}/mode/2up?view=theater`;
     console.log(`🧭 Visiting: ${url}`);
 
     try {
-      const patchScript = fs.readFileSync('./patchFlattenedData.js', 'utf8');
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
-
-      page.on('console', msg => {
-        const text = msg.text();
-        if (text.includes('SoundManager') || text.startsWith('JSHandle@error')) return;
-        console.log('📣 BROWSER LOG:', text);
-      });
-
+      // Wait until BookReader is loaded
       await page.waitForFunction(() => typeof window.BookReader !== 'undefined', { timeout: 30000 });
 
+      // Now it's safe to patch or use BookReader
       await page.evaluate(() => {
         try {
-          if (typeof window.BookReader !== 'undefined') {
-            // patchFlattenedData logic or any interaction here
-            console.log('✅ BookReader is available, patching...');
-            // Your patching or screenshot logic
-          } else {
-            console.log('❌ BookReader still missing in evaluate');
-          }
+          console.log('✅ BookReader is available');
+
+          // Example: Access page data (customize as needed)
+          const currentLeaf = window.BookReader?.getPageIndex(); // page number in IA logic
+          console.log('🔍 Current BookReader page index:', currentLeaf);
+          
+          const viewer = await page.$('.BRcontainer'); // or '.pageContainer'
+          await viewer.screenshot({ path: `screenshot-${pageNum}.png` });
+
+          // Your custom patching or screenshot logic here
+          // e.g., window.BookReader.patchFlattenedData() if such method exists
+
         } catch (err) {
-          console.error('💥 Patch script crashed:', err);
+          console.error('💥 BookReader patch failed:', err);
         }
       });
 
-    } catch (e) {
-      console.warn(`❌ Failed to load page ${url}:`, e.message);
-      continue;
-    }
-
-    for (let offset = 0; offset <= 1; offset++) {
-      const actualPage = startPage + offset;
-      const selector = `div.pagediv${actualPage}.BRpage-visible > img`;
-      const filename = path.join(outDir, `page_n${actualPage}.png`);
-
-      if (fs.existsSync(filename)) {
-        console.log(`⏭️ Skipping existing: ${filename}`);
-        continue;
-      }
-
-      try {
-        await page.waitForFunction(
-          (sel) => {
-            const img = document.querySelector(sel);
-            return img && img.complete && img.naturalWidth > 100;
-          },
-          { timeout: 3000 },
-          selector
-        );
-
-        const imgEl = await page.$(selector);
-        if (!imgEl) {
-          console.warn(`⚠️ No element found for page ${actualPage}`);
-          continue;
-        }
-
-        const clip = await imgEl.boundingBox();
-        if (!clip || clip.width < 50 || clip.height < 50) {
-          console.warn(`⚠️ Invalid clip size for page ${actualPage}`);
-          continue;
-        }
-
-        await page.screenshot({ path: filename, clip });
-        console.log(`✅ Saved: ${filename}`);
-      } catch (err) {
-        console.warn(`⚠️ Timeout or error for page n${actualPage}:`, err.message);
-      }
-
-      await new Promise(resolve => setTimeout(resolve, 1500));
+    } catch (err) {
+      console.error(`⚠️ Timeout or error for page n${pageNum}:`, err.message);
     }
   }
 
-//   await browser.close();
   console.log('🏁 Done.');
+  await browser.close();
 })();
