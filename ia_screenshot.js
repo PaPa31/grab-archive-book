@@ -25,10 +25,20 @@ const startPages = Array.from({ length: 2 }, (_, i) => 68 + i * 2);
     console.log(`🧭 Visiting: ${url}`);
 
     try {
-      await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
-      await page.waitForFunction(() => window.BookReader && typeof window.BookReader._getDataFlattened === 'function');
       const patchScript = fs.readFileSync('./patchFlattenedData.js', 'utf8');
-      await page.evaluate(patchScript);
+
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+
+      page.on('console', msg => {
+        console.log('📣 BROWSER LOG:', msg.text());
+      });
+
+      await page.waitForFunction(() => {
+        return typeof window.BookReader === 'function' || typeof window.br === 'function';
+      }, { timeout: 15000 });
+
+      await page.evaluate(new Function(patchScript));
+
     } catch (e) {
       console.warn(`❌ Failed to load page ${url}:`, e.message);
       continue;
