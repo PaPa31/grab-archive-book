@@ -8,7 +8,7 @@ if (!fs.existsSync(outDir)) {
 }
 
 // 📖 Choose Archive.org page numbers to start from (each loads 2 pages in 2-up view)
-const startPages = Array.from({ length: 5 }, (_, i) => 27 + i * 2);
+const startPages = Array.from({ length: 2 }, (_, i) => 68 + i * 2);
 
 (async () => {
   const browser = await puppeteer.launch({
@@ -21,11 +21,14 @@ const startPages = Array.from({ length: 5 }, (_, i) => 27 + i * 2);
   const page = await browser.newPage();
 
   for (const startPage of startPages) {
-    const url = `https://archive.org/details/electroniccircui0000sent/page/n${startPage}/mode/2up?view=theater`;
+    const url = `https://archive.org/details/electroniccircui0000sent/page/${startPage}/mode/2up?view=theater`;
     console.log(`🧭 Visiting: ${url}`);
 
     try {
       await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
+      await page.waitForFunction(() => window.BookReader && typeof window.BookReader._getDataFlattened === 'function');
+      const patchScript = fs.readFileSync('./patchFlattenedData.js', 'utf8');
+      await page.evaluate(patchScript);
     } catch (e) {
       console.warn(`❌ Failed to load page ${url}:`, e.message);
       continue;
@@ -47,7 +50,7 @@ const startPages = Array.from({ length: 5 }, (_, i) => 27 + i * 2);
             const img = document.querySelector(sel);
             return img && img.complete && img.naturalWidth > 100;
           },
-          { timeout: 15000 },
+          { timeout: 3000 },
           selector
         );
 
@@ -73,6 +76,6 @@ const startPages = Array.from({ length: 5 }, (_, i) => 27 + i * 2);
     }
   }
 
-  await browser.close();
+//   await browser.close();
   console.log('🏁 Done.');
 })();
