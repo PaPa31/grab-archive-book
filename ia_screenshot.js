@@ -15,24 +15,24 @@ if (!fs.existsSync(SCREENSHOT_DIR)) fs.mkdirSync(SCREENSHOT_DIR);
 
   page.on('console', msg => {
     const text = msg.text();
-    if (/(SoundManager|JSHandle@error|PSA Donation Banner|Slow network)/.test(text)) return;
+    if (/(SoundManager|JSHandle@error|PSA Donation Banner|Slow network|preloaded using link preload)/.test(text)) return;
     console.log('📣 BROWSER LOG:', text);
   });
 
   for (let i = 0; i < PAGE_COUNT; i++) {
-    const pageNum = START_PAGE + i*2;
+    const pageNum = START_PAGE + i * 2;
     const url = `${BASE_URL}/page/${pageNum}/mode/2up?view=theater`;
     console.log(`🧭 Visiting: ${url}`);
 
     try {
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 });
-      await page.waitForFunction(() => typeof window.BookReader !== 'undefined', { timeout: 30000 });
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      await page.waitForFunction(() => typeof window.BookReader !== 'undefined', { timeout: 40000 });
 
-      await new Promise(r => setTimeout(r, 2000));
+      await new Promise(r => setTimeout(r, 4000));
 
       await page.evaluate(() => {
         if (window.BookReader) {
-          window.BookReader._getDataFlattened = function() {
+          window.BookReader._getDataFlattened = function () {
             let i = null, o = 0;
             const flat = this.br.data.flatMap(p => p.map(pg => {
               pg.viewable = true;
@@ -47,22 +47,23 @@ if (!fs.existsSync(SCREENSHOT_DIR)) fs.mkdirSync(SCREENSHOT_DIR);
           };
           console.log('✅ Patched _getDataFlattened');
         } else {
-          console.log('❌ BookReader missing at patch time');
+          console.log('❌ BookReader missing when patching!');
         }
       });
 
-      await page.waitForFunction(
-        () => !!document.querySelector('div.BRpage-visible img[src*="Preview.php?page=leaf"]'),
-        { timeout: 15000 }
-      );
+      // Wait for *both* left & right images under `.BRpagecontainer.protected.BRpage-visible > img`
+      await page.waitForFunction(() => {
+        const imgs = document.querySelectorAll('div.BRpagecontainer.protected.BRpage-visible > img');
+        return imgs.length === 2 && Array.from(imgs).every(img => img.complete && img.naturalWidth > 100);
+      }, { timeout: 30000 });
 
-      const img = await page.$('div.BRpage-visible img[src*="Preview.php?page=leaf"]');
-      if (img) {
-        const filename = `page-${String(pageNum).padStart(3, '0')}.png`;
-        await img.screenshot({ path: path.join(SCREENSHOT_DIR, filename) });
-        console.log(`✅ Screenshot saved: ${filename}`);
+      const imgs = await page.$$('div.BRpagecontainer.protected.BRpage-visible > img');
+      if (imgs.length === 2) {
+        await imgs[0].screenshot({ path: path.join(SCREENSHOT_DIR, `page-${pageNum}-L.png`) });
+        await imgs[1].screenshot({ path: path.join(SCREENSHOT_DIR, `page-${pageNum}-R.png`) });
+        console.log(`✅ Saved left + right pages for ${pageNum}`);
       } else {
-        console.warn(`⚠️ No visible page image found for page ${pageNum}`);
+        console.warn(`⚠️ Only ${imgs.length} page(s) found for ${pageNum}`);
       }
 
     } catch (err) {
@@ -71,5 +72,5 @@ if (!fs.existsSync(SCREENSHOT_DIR)) fs.mkdirSync(SCREENSHOT_DIR);
   }
 
   console.log('🏁 Done.');
-//   await browser.close();
+  await browser.close();
 })();
