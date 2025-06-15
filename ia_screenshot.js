@@ -1,19 +1,27 @@
 const puppeteer = require('puppeteer');
+const fs = require('fs');
+const path = require('path');
 
 const START_PAGE = 68;
 const PAGE_COUNT = 3;
 const BASE_URL = 'https://archive.org/details/electroniccircui0000sent';
+const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
+
+// Ensure output folder exists
+if (!fs.existsSync(SCREENSHOT_DIR)) {
+  fs.mkdirSync(SCREENSHOT_DIR);
+}
 
 (async () => {
   const browser = await puppeteer.launch({
-    headless: false, // Use true for no GUI
+    headless: false, // set to true if you don’t need GUI
     defaultViewport: null,
     args: ['--start-maximized']
   });
 
   const page = await browser.newPage();
 
-  // Intercept and clean browser logs
+  // Filter useful logs only
   page.on('console', msg => {
     const text = msg.text();
     if (text.includes('SoundManager') || text.startsWith('JSHandle@error')) return;
@@ -28,34 +36,29 @@ const BASE_URL = 'https://archive.org/details/electroniccircui0000sent';
     try {
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
-      // Wait until BookReader is loaded
+      // Wait for BookReader object
       await page.waitForFunction(() => typeof window.BookReader !== 'undefined', { timeout: 30000 });
 
-      // Now it's safe to patch or use BookReader
-      await page.evaluate(() => {
-        try {
-          console.log('✅ BookReader is available');
+      // Wait a little extra for rendering
+      await page.waitForTimeout(2000);
 
-          // Example: Access page data (customize as needed)
-          const currentLeaf = window.BookReader?.getPageIndex(); // page number in IA logic
-          console.log('🔍 Current BookReader page index:', currentLeaf);
-          
-          const viewer = await page.$('.BRcontainer'); // or '.pageContainer'
-          await viewer.screenshot({ path: `screenshot-${pageNum}.png` });
+      // Select the book viewer container
+      const viewer = await page.$('.BRcontainer'); // you can adjust selector here if needed
 
-          // Your custom patching or screenshot logic here
-          // e.g., window.BookReader.patchFlattenedData() if such method exists
-
-        } catch (err) {
-          console.error('💥 BookReader patch failed:', err);
-        }
-      });
+      if (viewer) {
+        const filename = `page-${String(pageNum).padStart(3, '0')}.png`;
+        const fullPath = path.join(SCREENSHOT_DIR, filename);
+        await viewer.screenshot({ path: fullPath });
+        console.log(`✅ Saved screenshot: ${filename}`);
+      } else {
+        console.warn(`⚠️ Viewer not found on page ${pageNum}`);
+      }
 
     } catch (err) {
-      console.error(`⚠️ Timeout or error for page n${pageNum}:`, err.message);
+      console.error(`❌ Error for page n${pageNum}:`, err.message);
     }
   }
 
   console.log('🏁 Done.');
-  await browser.close();
+//   await browser.close();
 })();
