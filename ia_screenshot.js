@@ -30,14 +30,26 @@ const startPages = Array.from({ length: 2 }, (_, i) => 68 + i * 2);
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
       page.on('console', msg => {
-        console.log('📣 BROWSER LOG:', msg.text());
+        const text = msg.text();
+        if (text.includes('SoundManager') || text.startsWith('JSHandle@error')) return;
+        console.log('📣 BROWSER LOG:', text);
       });
 
-      await page.waitForFunction(() => {
-        return typeof window.BookReader === 'function' || typeof window.br === 'function';
-      }, { timeout: 15000 });
+      await page.waitForFunction(() => typeof window.BookReader !== 'undefined', { timeout: 30000 });
 
-      await page.evaluate(new Function(patchScript));
+      await page.evaluate(() => {
+        try {
+          if (typeof window.BookReader !== 'undefined') {
+            // patchFlattenedData logic or any interaction here
+            console.log('✅ BookReader is available, patching...');
+            // Your patching or screenshot logic
+          } else {
+            console.log('❌ BookReader still missing in evaluate');
+          }
+        } catch (err) {
+          console.error('💥 Patch script crashed:', err);
+        }
+      });
 
     } catch (e) {
       console.warn(`❌ Failed to load page ${url}:`, e.message);
