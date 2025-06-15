@@ -27,8 +27,17 @@ if (!fs.existsSync(SCREENSHOT_DIR)) fs.mkdirSync(SCREENSHOT_DIR);
     try {
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
       await page.waitForFunction(() => typeof window.BookReader !== 'undefined', { timeout: 40000 });
-
-      await new Promise(r => setTimeout(r, 4000));
+      
+      await page.evaluate(() => {
+        const el = document.querySelector('#BookReader');
+        if (el) {
+          el.scrollBy(0, 300); // Fake scroll to trigger loading
+          el.dispatchEvent(new Event('mousemove'));
+          el.click();
+          console.log('🌀 Simulated user interaction');
+        }
+      });
+      await new Promise(r => setTimeout(r, 3000)); // Give time to load real images
 
       await page.evaluate(() => {
         if (window.BookReader) {
@@ -51,11 +60,16 @@ if (!fs.existsSync(SCREENSHOT_DIR)) fs.mkdirSync(SCREENSHOT_DIR);
         }
       });
 
-      // Wait for *both* left & right images under `.BRpagecontainer.protected.BRpage-visible > img`
-      await page.waitForFunction(() => {
-        const imgs = document.querySelectorAll('div.BRpagecontainer.protected.BRpage-visible > img');
-        return imgs.length === 2 && Array.from(imgs).every(img => img.complete && img.naturalWidth > 100);
-      }, { timeout: 30000 });
+      let tries = 10;
+      while (tries--) {
+        const ok = await page.evaluate(() => {
+          const imgs = Array.from(document.querySelectorAll('div.BRpagecontainer.protected.BRpage-visible > img'));
+          return imgs.length === 2 && imgs.every(img => img.naturalWidth > 300 && !img.src.includes('grey.gif'));
+        });
+        if (ok) break;
+        console.log(`🔁 Waiting for real images... tries left: ${tries}`);
+        await page.waitForTimeout(1500);
+      }
 
       const imgs = await page.$$('div.BRpagecontainer.protected.BRpage-visible > img');
       if (imgs.length === 2) {
