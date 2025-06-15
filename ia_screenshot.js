@@ -1,26 +1,32 @@
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-core');
 const fs = require('fs');
 const path = require('path');
 
-const START_PAGE = 68;
-const PAGE_COUNT = 3;
-const BASE_URL = 'https://archive.org/details/electroniccircui0000sent';
-const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
-
-if (!fs.existsSync(SCREENSHOT_DIR)) fs.mkdirSync(SCREENSHOT_DIR);
-
 (async () => {
-  const browser = await puppeteer.launch({
-    headless: false,
-    slowMo: 100,
+  const browser = await puppeteer.connect({
+    browserURL: 'http://127.0.0.1:9222',
     defaultViewport: null,
-    args: ['--start-maximized']
   });
-  const page = await browser.newPage();
+
+  const pages = await browser.pages();
+  const page = pages[0] || await browser.newPage();
+
+  const START_PAGE = 68;
+  const PAGE_COUNT = 3;
+  const BASE_URL = 'https://archive.org/details/electroniccircui0000sent';
+  const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
+
+  if (!fs.existsSync(SCREENSHOT_DIR)) fs.mkdirSync(SCREENSHOT_DIR);
 
   page.on('console', msg => {
     const text = msg.text();
-    if (/(SoundManager|JSHandle@error|PSA Donation Banner|Slow network|preloaded using link preload)/.test(text)) return;
+    if (
+      text.includes('Iconochive-Regular.woff') ||
+      text.includes('preload') ||
+      text.includes('donation-banner') ||
+      text.includes('JSHandle') ||
+      text.includes('SoundManager')
+    ) return;
     console.log('📣 BROWSER LOG:', text);
   });
 
@@ -32,17 +38,17 @@ if (!fs.existsSync(SCREENSHOT_DIR)) fs.mkdirSync(SCREENSHOT_DIR);
     try {
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
       await page.waitForFunction(() => typeof window.BookReader !== 'undefined', { timeout: 40000 });
-      
+
       await page.evaluate(() => {
         const el = document.querySelector('#BookReader');
         if (el) {
-          el.scrollBy(0, 300); // Fake scroll to trigger loading
+          el.scrollBy(0, 300);
           el.dispatchEvent(new Event('mousemove'));
           el.click();
           console.log('🌀 Simulated user interaction');
         }
       });
-      await new Promise(r => setTimeout(r, 3000)); // Give time to load real images
+      await page.waitForTimeout(3000);
 
       await page.evaluate(() => {
         if (window.BookReader) {
@@ -90,6 +96,5 @@ if (!fs.existsSync(SCREENSHOT_DIR)) fs.mkdirSync(SCREENSHOT_DIR);
     }
   }
 
-  console.log('🏁 Done.');
-//   await browser.close();
+  console.log('🏁 Done. Browser remains open for future use.');
 })();
